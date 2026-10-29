@@ -392,8 +392,9 @@ u16 Platform::MP_RecvReplies(u8* packets, u64 timestamp, u16 aidmask, void*) {
         return 0;
     }
     u16 ret = 0;
+    u16 answered = 0; // AIDs that answered at all, including blank "not ready" replies
     int loops = 0;
-    while((ret & aidmask) != aidmask) {
+    while((answered & aidmask) != aidmask) {
         std::optional<MelonDsDs::Packet> o_p = MelonDsDs::Core.MpNextPacketBlock();
         if(!o_p.has_value()) {
             return ret;
@@ -405,8 +406,16 @@ u16 Platform::MP_RecvReplies(u8* packets, u64 timestamp, u16 aidmask, void*) {
         if(p.PacketType() != MelonDsDs::Packet::Type::Reply) {
             continue;
         }
-        ret |= 1<<p.Aid();
-        memcpy(&packets[(p.Aid()-1)*1024], p.Data(), std::min(p.Length(), (uint64_t)1024));
+        u8 aid = MelonDsDs::Core.MpReplyAid(p);
+        if(aid == 0 || aid >= 16) {
+            continue;
+        }
+        answered |= 1<<aid;
+        if(p.Aid() == 0) {
+            continue;
+        }
+        ret |= 1<<aid;
+        memcpy(&packets[(aid-1)*1024], p.Data(), std::min(p.Length(), (uint64_t)1024));
         loops++;
     }
     return ret;

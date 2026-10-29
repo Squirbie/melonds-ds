@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <queue>
 #include <optional>
+#include <unordered_map>
 #include <vector>
 #include <libretro.h>
 
@@ -48,12 +49,19 @@ public:
     [[nodiscard]] uint64_t Length() const noexcept {
         return _data.size();
     };
+    [[nodiscard]] uint16_t Sender() const noexcept {
+        return _sender;
+    };
+    void SetSender(uint16_t sender) noexcept {
+        _sender = sender;
+    };
 
     std::vector<uint8_t> ToBuf() const;
 private:
     uint64_t _timestamp;
     uint8_t _aid;
     Packet::Type _type;
+    uint16_t _sender = 0;
     std::vector<uint8_t> _data;
 };
 
@@ -66,6 +74,7 @@ public:
     void SendPacket(const Packet &p) noexcept;
     std::optional<Packet> NextPacket() noexcept;
     std::optional<Packet> NextPacketBlock() noexcept;
+    uint8_t ReplyAid(const Packet &p) noexcept;
 private:
     bool _warnedHighLatency = false;
     int _timeoutCount = 0;
@@ -73,5 +82,7 @@ private:
     retro_netpacket_poll_receive_t _pollFn;
     std::optional<uint16_t> _hostId;
     std::queue<Packet> receivedPackets;
+    // AID each netplay client last replied with, so blank replies can be attributed
+    std::unordered_map<uint16_t, uint8_t> _replyAids;
 };
 }

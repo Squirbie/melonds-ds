@@ -96,6 +96,7 @@ namespace MelonDsDs {
         bool MpSendPacket(const Packet &p) noexcept;
         std::optional<Packet> MpNextPacket() noexcept;
         std::optional<Packet> MpNextPacketBlock() noexcept;
+        uint8_t MpReplyAid(const Packet &p) noexcept { return _mpState.ReplyAid(p); }
         bool MpActive() const noexcept;
 
         void WriteNdsSave(std::span<const std::byte> savedata, uint32_t writeoffset, uint32_t writelen) noexcept;

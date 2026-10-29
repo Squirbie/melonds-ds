@@ -15,7 +15,8 @@
 */
 #include "mp.hpp"
 #include "environment.hpp"
-#include <ctime>
+#include <chrono>
+#include <thread>
 #include <libretro.h>
 #include <retro_assert.h>
 #include <retro_endianness.h>
@@ -24,7 +25,10 @@ using namespace MelonDsDs;
 // How many successive timeouts before
 // the player gets notified they are not supposed to use a VPN.
 constexpr int SUCCESSIVE_TIMEOUTS_WARNING = 6;
-constexpr long RECV_TIMEOUT_MS = 25;
+// How long to wait for a reply, on the wall clock. (The old 25 ms budget was measured with
+// std::clock, i.e. process CPU time, so the real wait was much shorter; two slow devices
+// on Wi-Fi often missed it and the DS game dropped the link.)
+constexpr long RECV_TIMEOUT_MS = 150;
 
 uint64_t swapToNetwork(uint64_t n) {
     return swap_if_little64(n);
@@ -106,6 +110,7 @@ void MpState::SetPollFn(retro_netpacket_poll_receive_t pollFn) noexcept {
 void MpState::PacketReceived(const void *buf, size_t len, uint16_t client_id) noexcept {
     retro_assert(IsReady());
     Packet p = Packet::parsePk(buf, len);
+    p.SetSender(client_id);
     if(p.PacketType() == Packet::Type::Cmd) {
         _hostId = client_id;
         //retro::debug("Host client id is {}", client_id);
@@ -132,13 +137,15 @@ std::optional<Packet> MpState::NextPacket() noexcept {
 std::optional<Packet> MpState::NextPacketBlock() noexcept {
     retro_assert(IsReady());
     if (receivedPackets.empty()) {
-        for(std::clock_t start = std::clock(); std::clock() < (start + (RECV_TIMEOUT_MS * CLOCKS_PER_SEC / 1000));) {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(RECV_TIMEOUT_MS);
+        do {
             _sendFn(RETRO_NETPACKET_FLUSH_HINT, NULL, 0, RETRO_NETPACKET_BROADCAST);
             _pollFn();
             if(!receivedPackets.empty()) {
                 return NextPacket();
             }
-        }
+            std::this_thread::yield();
+        } while (std::chrono::steady_clock::now() < deadline);
     } else {
         return NextPacket();
     }
@@ -149,6 +156,18 @@ std::optional<Packet> MpState::NextPacketBlock() noexcept {
     }
     retro::debug("Timeout while waiting for packet");
     return std::nullopt;
+}
+
+// A client that isn't ready to answer a CMD sends a blank reply with AID 0
+// (see SendMPReply in melonDS's Wifi.cpp). Standalone melonDS stops waiting once every client answered,
+// blank or not; here we remember which AID each netplay client uses so its blank reply counts too.
+uint8_t MpState::ReplyAid(const Packet &p) noexcept {
+    if (p.Aid() != 0) {
+        _replyAids[p.Sender()] = p.Aid();
+        return p.Aid();
+    }
+    auto it = _replyAids.find(p.Sender());
+    return it == _replyAids.end() ? 0 : it->second;
 }
 
 void MpState::SendPacket(const Packet &p) noexcept {
